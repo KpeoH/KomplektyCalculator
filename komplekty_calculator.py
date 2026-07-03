@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-Калькулятор комплектов мебели для Евро Офис (office-dv.ru)
-PySide6 приложение с кастомной title bar, парсингом, скрапингом цен и генерацией отчёта.
-
-Установка зависимостей:
-    pip install PySide6 requests beautifulsoup4 lxml
-
-Запуск:
-    python komplekty_calculator.py
-"""
-
 import sys
 import os
 import re
@@ -31,15 +19,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QPoint
 from PySide6.QtGui import QFont, QDesktopServices, QMouseEvent, QIcon, QColor, QPalette
 
-# ==================== КОНФИГУРАЦИЯ ====================
-DEFAULT_INPUT = "наименования.txt"  # или укажите полный путь при запуске
+DEFAULT_INPUT = "выберите файл"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 REQUEST_TIMEOUT = 12
 RATE_BASE = 71.3
 RATE_STEP = 0.1
 RATE_BRACKET = 500
 
-# Цветовая схема (красивый тёмно-синий профессиональный стиль)
+
 PRIMARY_COLOR = "#1565C0"
 PRIMARY_DARK = "#0D47A1"
 ACCENT_COLOR = "#42A5F5"
@@ -50,7 +37,7 @@ SUCCESS_COLOR = "#4CAF50"
 WARNING_COLOR = "#FF9800"
 DANGER_COLOR = "#E53935"
 
-# ==================== ПАРСЕР ВХОДНОГО ФАЙЛА ====================
+
 def parse_kits_from_text(text: str) -> OrderedDict:
     """Разбирает текстовый файл на комплекты."""
     lines = text.strip().splitlines()
@@ -86,7 +73,7 @@ def parse_items_from_lines(lines: list) -> OrderedDict:
         if not line:
             continue
 
-        # Определяем внешний множитель всей строки, напр. "...(х2)"
+
         outer_match = re.search(r"\)\s*\(х(\d+)\)\s*$", line)
         outer_qty = int(outer_match.group(1)) if outer_match else 1
         work_line = line[: outer_match.start()] if outer_match else line
@@ -102,13 +89,11 @@ def parse_items_from_lines(lines: list) -> OrderedDict:
                 item_qty[code] = total_qty
     return item_qty
 
-# ==================== СКРЕЙПЕР ====================
 class ProductScraper:
     def __init__(self):
         self.cache = {}
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
-        # Загрузка кэша из файла (если есть)
         self._load_cache()
 
     def _load_cache(self):
@@ -126,17 +111,14 @@ class ProductScraper:
             print(f"[Cache] Не удалось загрузить кэш: {e}")
 
     def determine_type(self, code: str, full_title: str, page_text: str) -> str:
-        """Определяет короткое название типа товара для вывода (как в примере). Приоритет: шкафы/двери > столы."""
         text = (full_title + " " + page_text).lower()
         code_u = code.upper()
 
-        # Приоритет шкафам и дверям (проверяем раньше "стол")
         if "каркас шкафа" in text or code_u.startswith(("LHC", "LCW")):
             return "шкаф"
         elif "шкаф" in text and "стол" not in text:
             return "шкаф"
         elif "дверь стеклянная" in text or "стеклянн" in text or "lmrg" in code_u:
-            # Все варианты LMRG — просто "дверь стеклянная" (независимо от (R)/(L))
             return "дверь стеклянная"
         elif "двери низкие" in text or code_u.startswith("LLD"):
             return "двери низкие"
@@ -150,11 +132,9 @@ class ProductScraper:
             return "элемент мебели"
 
     def scrape(self, raw_code: str) -> dict:
-        """Скрапит данные по коду. Сначала поиск, затем (при необходимости) карточка товара."""
         if raw_code in self.cache:
             return self.cache[raw_code]
 
-        # Нормализуем код для поиска (сохраняем оригинал для типа)
         search_code = re.sub(r"\s*\(.*?\)", "", raw_code).strip()
         q = search_code.replace(" ", "+")
         search_url = f"https://office-dv.ru/catalog/?q={q}"
@@ -169,7 +149,6 @@ class ProductScraper:
         }
 
         try:
-            # === Поиск ===
             resp = self.session.get(search_url, timeout=REQUEST_TIMEOUT)
             if resp.status_code != 200:
                 result["error"] = f"HTTP search {resp.status_code}"
@@ -179,13 +158,11 @@ class ProductScraper:
             soup = BeautifulSoup(resp.text, "html.parser")
             page_text = soup.get_text(separator=" ", strip=True)
 
-            # Попытка найти ссылку на детальную карточку товара
             detail_link = soup.find("a", href=re.compile(r"/catalog/.*" + re.escape(search_code.lower().replace(" ", "-"))))
             detail_url = None
             if detail_link and detail_link.get("href"):
                 detail_url = "https://office-dv.ru" + detail_link.get("href") if not detail_link.get("href").startswith("http") else detail_link.get("href")
 
-            # Если есть детальная страница — заходим туда (более точные данные)
             if detail_url:
                 try:
                     detail_resp = self.session.get(detail_url, timeout=REQUEST_TIMEOUT)
@@ -194,9 +171,7 @@ class ProductScraper:
                         page_text = soup.get_text(separator=" ", strip=True)
                         result["url"] = detail_url
                 except:
-                    pass  # продолжаем с данными из поиска
-
-            # === Цена (с учётом классов из карточки) ===
+                    pass  
             price_elem = soup.find(class_=re.compile(r"price__new-val|price"))
             if price_elem:
                 price_text = price_elem.get_text(strip=True)
@@ -208,7 +183,6 @@ class ProductScraper:
                     except ValueError:
                         pass
             else:
-                # fallback regex
                 price_match = re.search(r"(\d[\d\s\xa0]*)\s*₽", page_text)
                 if price_match:
                     price_str = price_match.group(1).replace(" ", "").replace("\xa0", "")
@@ -217,8 +191,6 @@ class ProductScraper:
                     except ValueError:
                         pass
 
-            # === Размеры (улучшенный поиск по классам и тексту) ===
-            # Ищем по классам из карточки
             dims_elems = soup.find_all(class_=re.compile(r"properties__value|properties__item|js-prop-value|dimensions"))
             dims_found = False
             for elem in dims_elems:
@@ -229,22 +201,18 @@ class ProductScraper:
                     dims_found = True
                     break
             if not dims_found:
-                # Более широкий поиск по тексту
                 dims_match = re.search(r"(?:Размеры|Габариты|размер)[:\s]*(\d+х\d+х\d+)", page_text, re.IGNORECASE)
                 if dims_match:
                     result["dims"] = dims_match.group(1) + " мм"
                 else:
-                    # Альтернативный паттерн для любых размеров в тексте
                     dims_match = re.search(r"(\d{3,4})[хx](\d{3,4})[хx](\d{3,4})", page_text)
                     if dims_match:
                         result["dims"] = f"{dims_match.group(1)}х{dims_match.group(2)}х{dims_match.group(3)} мм"
 
-            # Полное название — приоритет классу "font_32 switcher-title js-popup-title"
             title_elem = soup.find(class_=re.compile(r"font_32|switcher-title|js-popup-title"))
             if title_elem:
                 result["full_title"] = title_elem.get_text(strip=True)
             else:
-                # fallback
                 title_elem = soup.find(["h1", "title", "meta"], attrs={"property": "og:title"})
                 if title_elem:
                     if hasattr(title_elem, "get"):
@@ -257,12 +225,10 @@ class ProductScraper:
                 if link:
                     result["full_title"] = link.get_text(strip=True)
 
-            # Очищаем полное название для лучшего определения типа (отбрасываем код, бренд, цвет)
-            clean_title = re.sub(r"^[A-Z0-9\s\-]+\s+", "", result["full_title"])  # убираем код в начале
+            clean_title = re.sub(r"^[A-Z0-9\s\-]+\s+", "", result["full_title"]) 
             clean_title = re.sub(r"\s*\([^\)]+\)$|\s+SKYLAND.*|\s+Дуб.*|\s+Сосна.*", "", clean_title).strip()
             result["type"] = self.determine_type(raw_code, clean_title or result["full_title"], page_text)
 
-            # Для дверей подмена размеров (как в примере)
             if result["type"] in ("дверь стеклянная (левая + правая)", "двери низкие", "двери шкафа") and ("394" in result["dims"] or result["dims"] == "н/д"):
                 result["dims"] = "400х430х2253 мм"
 
@@ -274,10 +240,9 @@ class ProductScraper:
         self.cache[raw_code] = result
         return result
 
-# ==================== РАБОЧИЙ ПОТОК ====================
 class ProcessingWorker(QThread):
-    progress = Signal(int, str)          # percent, log_message
-    finished = Signal(str, str)          # output_path, full_report_text
+    progress = Signal(int, str)        
+    finished = Signal(str, str)         
     error = Signal(str)
 
     def __init__(self, input_path: str, output_path: str):
@@ -287,12 +252,11 @@ class ProcessingWorker(QThread):
         self.scraper = ProductScraper()
 
     def calculate_rate(self, total_sum: int) -> float:
-        """Расчёт ставки по формуле (соответствует примерам 140745→43.2 и 141200→43.1)."""
         if total_sum <= 0:
             return 43.2
         level = total_sum // RATE_BRACKET
         rate = RATE_BASE - level * RATE_STEP
-        return round(max(rate, 10.0), 1)  # минимальная ставка 10.0
+        return round(max(rate, 10.0), 1)  
 
     def run(self):
         try:
@@ -311,7 +275,6 @@ class ProcessingWorker(QThread):
 
             self.progress.emit(5, f"Найдено {len(kits_raw)} комплектов. Уникальных товаров: {len(unique_codes)}. Начинаем параллельный скрапинг...")
 
-            # Параллельный скрапинг (ускорение в 5-10 раз)
             def scrape_one(code):
                 return self.scraper.scrape(code)
 
@@ -363,8 +326,7 @@ class ProcessingWorker(QThread):
                         status += f" [ОШИБКА: {data['error']}]"
                     self.progress.emit(pct_base + item_num * 2, status)
 
-                # Итоги комплекта
-                total_sum = int(pre_sum * 0.9 + 0.5)  # округление до ближайшего
+                total_sum = int(pre_sum * 0.9 + 0.5) 
                 rate = self.calculate_rate(total_sum)
 
                 kit_report = {
@@ -381,7 +343,6 @@ class ProcessingWorker(QThread):
                     f"  ИТОГО (со скидкой 10%): {total_sum} ₽ | Ставка: {rate}"
                 )
 
-            # Генерация финального текстового отчёта с улучшенной вёрсткой и разделителями
             report_lines = []
             for kit in all_kits_data:
                 report_lines.append("=" * 90)
@@ -403,7 +364,6 @@ class ProcessingWorker(QThread):
 
             self.progress.emit(100, f"\n✓ Готово! Отчёт сохранён: {self.output_path}")
 
-            # Сохранение кэша спаршенных товаров (для будущих запусков)
             try:
                 import json
                 cache_file = os.path.join(os.path.dirname(self.output_path) or ".", "parsed_products_cache.json")
@@ -419,7 +379,6 @@ class ProcessingWorker(QThread):
             import traceback
             self.error.emit(f"{str(e)}\n{traceback.format_exc()}")
 
-# ==================== КАСТОМНАЯ TITLE BAR ====================
 class TitleBar(QWidget):
     def __init__(self, parent_window):
         super().__init__(parent_window)
@@ -458,13 +417,11 @@ class TitleBar(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Иконка + название
         self.title_label = QLabel("  🪑 Калькулятор комплектов мебели  •  Евро Офис")
         self.title_label.setObjectName("title")
         self.title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout.addWidget(self.title_label)
-
-        # Кнопки управления окном
+        
         for text, slot, obj_name in [
             ("−", self.parent_window.showMinimized, "btnMin"),
             ("□", self.toggle_maximize, "btnMax"),
@@ -495,7 +452,6 @@ class TitleBar(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent):
         self._drag_pos = None
 
-# ==================== ГЛАВНОЕ ОКНО ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -691,7 +647,6 @@ class MainWindow(QMainWindow):
             self.append_log("❌ Файл не найден!")
             return
 
-        # Формируем путь для вывода рядом с входным
         base_dir = os.path.dirname(input_path) or "."
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_path = os.path.join(base_dir, f"отчет_комплекты_{timestamp}.txt")
@@ -703,7 +658,6 @@ class MainWindow(QMainWindow):
         self.status_frame.hide()
         self.append_log("🚀 Запуск обработки...")
 
-        # Запускаем worker
         self.worker = ProcessingWorker(input_path, self.output_path)
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
@@ -723,7 +677,6 @@ class MainWindow(QMainWindow):
         self.append_log(f"\n🎉 Файл сохранён: {output_path}")
         self.append_log("Можете открыть его или запустить обработку другого файла.")
 
-        # Сохраняем путь для кнопки
         self.output_path = output_path
 
     def on_error(self, err_msg: str):
@@ -738,12 +691,10 @@ class MainWindow(QMainWindow):
         else:
             self.append_log("Файл отчёта не найден.")
 
-# ==================== ЗАПУСК ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    # Глобальная палитра (тёмная тема)
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(BG_COLOR))
     palette.setColor(QPalette.WindowText, QColor(TEXT_COLOR))
